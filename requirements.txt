@@ -1,0 +1,9 @@
+mediapipe==0.10.9
+opencv-python==4.9.0.80
+numpy==1.26.4
+scipy==1.13.0
+PyQt5==5.15.10
+paho-mqtt==2.0.0
+plyer==2.1.0
+matplotlib==3.8.4
+# sqlite3 is built into Python — no install needed
