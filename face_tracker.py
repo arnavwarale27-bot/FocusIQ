@@ -102,14 +102,20 @@ class FaceTracker:
             # ── Store the annotated frame for the dashboard ──────────────
             self.shared_state["frame"] = frame.copy()
 
-            # NOTE: cv2.imshow is intentionally NOT called here.
-            # On macOS, imshow must run on the main thread.
-            # The PyQt5 dashboard (WebcamLabel) displays this frame.
+            # ── Preview window (optional — disable in headless mode) ──────
+            cv2.putText(
+                frame,
+                f"Landmarks: {len(self.shared_state.get('landmarks', []))}",
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
+            )
+            cv2.imshow("AI Focus Monitor — Face Tracker", frame)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
 
         cap.release()
+        cv2.destroyAllWindows()
         self.face_mesh.close()
         print("[FaceTracker] Stopped.")
-
 
 
 # ── Standalone test ──────────────────────────────────────────────────────────
