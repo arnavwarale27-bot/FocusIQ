@@ -28,9 +28,10 @@ class FaceTracker:
     draws landmarks, and writes results to shared_state.
     """
 
-    def __init__(self, shared_state: dict, camera_index: int = 0):
+    def __init__(self, shared_state: dict, camera_index: int = 0, headless: bool = False):
         self.shared_state = shared_state
         self.camera_index = camera_index
+        self.headless = headless
         self._stop_event = threading.Event()
 
         # FaceMesh: refine_landmarks=True gives more precise eye/iris points
@@ -52,7 +53,7 @@ class FaceTracker:
             print("[FaceTracker] ERROR: Cannot open camera.")
             return
 
-        print("[FaceTracker] Camera opened. Press Q in the window to quit.")
+        print(f"[FaceTracker] Camera opened. {'Headless mode.' if self.headless else 'Press Q in the window to quit.'}")
 
         while not self._stop_event.is_set():
             ret, frame = cap.read()
@@ -102,18 +103,20 @@ class FaceTracker:
             # ── Store the annotated frame for the dashboard ──────────────
             self.shared_state["frame"] = frame.copy()
 
-            # ── Preview window (optional — disable in headless mode) ──────
-            cv2.putText(
-                frame,
-                f"Landmarks: {len(self.shared_state.get('landmarks', []))}",
-                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
-            )
-            cv2.imshow("AI Focus Monitor — Face Tracker", frame)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
+            # ── Preview window (only when NOT headless) ──────────────────
+            if not self.headless:
+                cv2.putText(
+                    frame,
+                    f"Landmarks: {len(self.shared_state.get('landmarks', []))}",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2,
+                )
+                cv2.imshow("AI Focus Monitor — Face Tracker", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
 
         cap.release()
-        cv2.destroyAllWindows()
+        if not self.headless:
+            cv2.destroyAllWindows()
         self.face_mesh.close()
         print("[FaceTracker] Stopped.")
 

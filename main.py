@@ -44,6 +44,7 @@ from posture            import PostureDetector
 from enforcer           import TwentyTwentyTwentyEnforcer
 from frustration_mapper import FrustrationMapper
 from database           import init_db, export_session_csv
+from calibration        import Calibrator
 from dashboard          import run_dashboard   # must run on main thread
 
 # ── Optional MQTT IoT module (paho-mqtt) ─────────────────────────────────────
@@ -135,8 +136,7 @@ def main():
         "blink_count"       : 0,
         "blink_rate_pm"     : 0.0,
         "blink_velocity"    : 0.0,
-        "is_drowsy"         : False,
-        "drowsy_alert"      : False,
+        "drowsy"            : False,
         "yaw"               : 0.0,
         "pitch"             : 0.0,
         "roll"              : 0.0,
@@ -155,13 +155,14 @@ def main():
     }
 
     # ── Instantiate modules ───────────────────────────────────────────────
-    face_tracker   = FaceTracker(shared_state,        camera_index=0)
+    face_tracker   = FaceTracker(shared_state,        camera_index=0, headless=True)
     blink_detector = BlinkDetector(shared_state,      fps=30)
     head_pose      = HeadPoseEstimator(shared_state,  fps=30)
     focus_calc     = FocusScoreCalculator(shared_state)
     frustration    = FrustrationMapper(shared_state,  fps=30)
     enforcer       = TwentyTwentyTwentyEnforcer(shared_state)
     posture_det    = PostureDetector(shared_state,    camera_index=0)
+    calibrator     = Calibrator(shared_state)
 
     stop_event = threading.Event()
 
@@ -195,7 +196,7 @@ def main():
 
     try:
         # PyQt5 MUST run on the main thread
-        run_dashboard(shared_state)
+        run_dashboard(shared_state, calibrator=calibrator)
     except KeyboardInterrupt:
         print("\n[Main] Interrupted by user.")
     finally:

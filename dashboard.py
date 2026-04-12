@@ -4,7 +4,7 @@ PyQt5 dashboard with:
   - Left:   live webcam with landmark overlay
   - Centre: circular QDial showing focus score 0–100
   - Right:  real-time matplotlib graph (last 5 minutes)
-  - Bottom: session stats bar
+  - Bottom: session stats bar + calibration panel
 Refreshes every 100 ms using QTimer.
 """
 
@@ -20,7 +20,7 @@ matplotlib.use("Agg")   # must be set before pyplot import; safe for Qt embeddin
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QHBoxLayout, QVBoxLayout, QLabel, QDial,
-    QFrame, QSizePolicy,
+    QFrame, QSizePolicy, QPushButton, QMessageBox,
 )
 from PyQt5.QtCore  import Qt, QTimer
 from PyQt5.QtGui   import QImage, QPixmap, QFont, QColor, QPalette
@@ -196,6 +196,82 @@ class StatsBar(QWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Calibration Panel — buttons for recording + threshold calculation
+# ─────────────────────────────────────────────────────────────────────────────
+class CalibrationPanel(QWidget):
+    def __init__(self, calibrator):
+        super().__init__()
+        self.calibrator = calibrator
+        self.setStyleSheet("background: #1a1a2e; border-top: 1px solid #333; padding: 4px;")
+        layout = QHBoxLayout(self)
+
+        btn_style = """
+            QPushButton {
+                color: #eee; font-size: 11px; padding: 6px 14px;
+                border: 1px solid #444; border-radius: 4px;
+                background: #2a2a3e;
+            }
+            QPushButton:hover { background: #3a3a5e; }
+            QPushButton:pressed { background: #4a4a6e; }
+        """
+
+        self.btn_focused = QPushButton("🟢 Start Focused Calibration")
+        self.btn_focused.setStyleSheet(btn_style)
+        self.btn_focused.clicked.connect(lambda: self._start("focused"))
+
+        self.btn_distracted = QPushButton("🔴 Start Distracted Calibration")
+        self.btn_distracted.setStyleSheet(btn_style)
+        self.btn_distracted.clicked.connect(lambda: self._start("distracted"))
+
+        self.btn_stop = QPushButton("⏹ Stop")
+        self.btn_stop.setStyleSheet(btn_style)
+        self.btn_stop.clicked.connect(self._stop)
+
+        self.btn_calc = QPushButton("⚡ Calculate My Thresholds")
+        self.btn_calc.setStyleSheet(btn_style)
+        self.btn_calc.clicked.connect(self._calculate)
+
+        self.status_lbl = QLabel("Calibration: Idle")
+        self.status_lbl.setStyleSheet("color: #aaa; font-size: 11px; padding: 0 12px;")
+
+        layout.addWidget(self.btn_focused)
+        layout.addWidget(self.btn_distracted)
+        layout.addWidget(self.btn_stop)
+        layout.addWidget(self.btn_calc)
+        layout.addWidget(self.status_lbl)
+
+    def _start(self, mode):
+        self.calibrator.start(mode)
+        self.status_lbl.setText(f"Calibration: 🔴 Recording ({mode})")
+
+    def _stop(self):
+        self.calibrator.stop()
+        self.status_lbl.setText("Calibration: Idle")
+
+    def _calculate(self):
+        result = self.calibrator.calculate_thresholds()
+        if result:
+            msg = "Personalized thresholds saved!\n\n"
+            for k, v in result.items():
+                if k == "raw_stats":
+                    continue
+                msg += f"  {k}: {v}\n"
+            QMessageBox.information(self, "Calibration Complete", msg)
+            self.status_lbl.setText("Calibration: ✅ Thresholds saved")
+        else:
+            QMessageBox.warning(
+                self, "Calibration Incomplete",
+                "Need both focused AND distracted sessions.\n"
+                "Record both before calculating thresholds."
+            )
+
+    def update_status(self):
+        """Called by timer to keep status label in sync."""
+        if self.calibrator.status != "Idle":
+            self.status_lbl.setText(f"Calibration: 🔴 {self.calibrator.status}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main Dashboard Window
 # ─────────────────────────────────────────────────────────────────────────────
 class Dashboard(QMainWindow):
@@ -204,7 +280,7 @@ class Dashboard(QMainWindow):
     The QTimer handles all refreshes internally at 10 fps (100 ms).
     """
 
-    def __init__(self, shared_state: dict):
+    def __init__(self, shared_state: dict, calibrator=None):
         super().__init__()
         self.shared_state   = shared_state
         self._graph_tick    = 0   # throttle graph to every 10th timer tick (1s)
@@ -241,6 +317,12 @@ class Dashboard(QMainWindow):
         self.stats = StatsBar()
         main_layout.addWidget(self.stats)
 
+        # Calibration panel
+        self.cal_panel = None
+        if calibrator is not None:
+            self.cal_panel = CalibrationPanel(calibrator)
+            main_layout.addWidget(self.cal_panel)
+
         # ── Refresh timer ─────────────────────────────────────────────────
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._refresh)
@@ -269,12 +351,16 @@ class Dashboard(QMainWindow):
         # Stats
         self.stats.update_stats(state)
 
+        # Calibration status
+        if self.cal_panel:
+            self.cal_panel.update_status()
+
 
 # ── Standalone test ──────────────────────────────────────────────────────────
-def run_dashboard(shared_state: dict):
+def run_dashboard(shared_state: dict, calibrator=None):
     """Call this in the MAIN thread (PyQt5 requires the GUI on the main thread)."""
     app = QApplication.instance() or QApplication(sys.argv)
-    win = Dashboard(shared_state)
+    win = Dashboard(shared_state, calibrator=calibrator)
     win.show()
     app.exec_()
 

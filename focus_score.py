@@ -1,28 +1,60 @@
 """
-focus_score.py — Phase 4
-Calculates a 0–100 focus score every second:
-    Score = 100 - (gaze_away_penalty + blink_penalty + head_turn_penalty)
-Smoothed using a 5-second rolling average, saved to SQLite.
+focus_score.py — Time-based attention score with EMA smoothing
+
+Score starts at 100 and changes per second:
+  INCREASE (focused):
+    +2/s when face detected, not drowsy, head stable
+    +0.5/s once score > 90 (hard to reach 100)
+
+  DECREASE (distracted):
+    -5/s  face not detected
+    -3/s  yaw > 20° or pitch > 20°
+    -5/s  drowsy
+    -2/s  blink_rate_pm < 5 or > 40
+    -1/s  bad posture
+
+  Normal blinks → NO score change
+  EMA smoothing: alpha = 0.1
+  Clamped 0–100
 """
 
 import time
 import threading
 import collections
 import sqlite3
+import json
 import os
 from datetime import datetime
 
-# ── Penalty configuration ────────────────────────────────────────────────────
-GAZE_PENALTY_PER_SEC   = 15   # deducted each second eyes/head are off screen
-BLINK_PENALTY_PER_MIN  = 2    # deducted per extra blink above normal 20 bpm
-NORMAL_BLINK_RATE      = 20   # blinks/min baseline
-HEAD_TURN_PENALTY      = 10   # deducted each second head is turned away
+# DB / calibration paths
+DB_PATH   = os.path.join(os.path.dirname(__file__), "focus_data.db")
+JSON_PATH = os.path.join(os.path.dirname(__file__), "calibration.json")
 
-# Rolling average window (seconds)
-ROLLING_WINDOW = 5
+# Default thresholds (overridden by calibration.json if it exists)
+DEFAULT_THRESHOLDS = {
+    "yaw_threshold"   : 20.0,
+    "pitch_threshold" : 20.0,
+    "blink_low"       : 5.0,
+    "blink_high"      : 40.0,
+}
 
-# DB path — sits in the same folder as this script
-DB_PATH = os.path.join(os.path.dirname(__file__), "focus_data.db")
+
+def _load_thresholds() -> dict:
+    """Load personalized thresholds from calibration.json, or use defaults."""
+    thresholds = DEFAULT_THRESHOLDS.copy()
+    if os.path.exists(JSON_PATH):
+        try:
+            with open(JSON_PATH, "r") as f:
+                personal = json.load(f)
+            for key in DEFAULT_THRESHOLDS:
+                if key in personal:
+                    thresholds[key] = personal[key]
+            print(f"[FocusScore] Loaded personalized thresholds from {JSON_PATH}")
+        except Exception as e:
+            print(f"[FocusScore] Error loading calibration.json: {e} — using defaults")
+    else:
+        print("[FocusScore] No calibration.json found — using default thresholds")
+    return thresholds
 
 
 def _init_db(db_path: str):
@@ -46,84 +78,124 @@ def _init_db(db_path: str):
 
 class FocusScoreCalculator:
     """
-    Runs every 1 second, reads sensor data from shared_state,
-    computes the focus score, and writes back.
+    Runs every 1 second. Computes a delta to the current score
+    based on attention signals, applies EMA smoothing, and writes
+    the result to shared_state.
 
-    shared_state keys read:
-        is_drowsy     (bool)
-        looked_away   (bool)
-        blink_rate_pm (float)
-        ear           (float)
-        yaw           (float)
-        pitch         (float)
+    shared_state keys READ:
+        face_detected   (bool)
+        yaw             (float)  degrees
+        pitch           (float)  degrees
+        drowsy          (bool)
+        blink_rate_pm   (float)  blinks per minute
+        bad_posture     (bool)
+        ear             (float)
 
-    shared_state keys written:
-        focus_score     (float)  — current smooth score 0–100
-        focus_score_raw (float)  — unsmoothed score
-        score_history   (list)   — list of (timestamp, score) for graph
+    shared_state keys WRITTEN:
+        focus_score     (float)  0–100
+        score_history   (list)   list of (timestamp_str, score), max 300
     """
 
     def __init__(self, shared_state: dict):
         self.shared_state = shared_state
-        self._stop_event  = threading.Event()
-        # Deque of raw scores for rolling average (max = ROLLING_WINDOW entries)
-        self._window: collections.deque = collections.deque(maxlen=ROLLING_WINDOW)
-        # History for the dashboard graph (last 5 minutes × 1 sample/sec = 300)
+        self._stop_event = threading.Event()
         self._history: collections.deque = collections.deque(maxlen=300)
+
+        # EMA state
+        self._alpha = 0.1
+        self._current_score = 100.0
+        self._start_time = time.time()
+
+        # Load personalized or default thresholds
+        self._thresholds = _load_thresholds()
 
         _init_db(DB_PATH)
 
     def stop(self):
         self._stop_event.set()
 
-    def _compute_raw_score(self) -> float:
-        """Apply penalties to derive raw score."""
-        score = 100.0
+    def _compute_delta(self) -> float:
+        """
+        Compute the per-second score change.
+        Positive = focused (score goes up).
+        Negative = distracted (score goes down).
+        Penalties stack additively.
+        """
+        state = self.shared_state
+        delta = 0.0
 
-        # 1. Gaze / drowsiness penalty
-        #    If EAR is low (eyes closed) or head is turned away → penalise
-        if self.shared_state.get("is_drowsy", False):
-            score -= GAZE_PENALTY_PER_SEC
-        if self.shared_state.get("looked_away", False):
-            score -= HEAD_TURN_PENALTY
+        face_detected = state.get("face_detected", True)
+        drowsy        = state.get("drowsy", False)
+        yaw           = abs(state.get("yaw", 0.0))
+        pitch         = abs(state.get("pitch", 0.0))
+        blink_rpm     = state.get("blink_rate_pm", 15.0)
+        bad_posture   = state.get("bad_posture", False)
+        uptime        = time.time() - self._start_time
 
-        # 2. Blink penalty
-        #    Each blink/min above normal costs 2 points
-        blink_rpm = self.shared_state.get("blink_rate_pm", NORMAL_BLINK_RATE)
-        excess_blinks = max(0, blink_rpm - NORMAL_BLINK_RATE)
-        score -= excess_blinks * BLINK_PENALTY_PER_MIN
+        yaw_thresh   = self._thresholds["yaw_threshold"]
+        pitch_thresh = self._thresholds["pitch_threshold"]
+        blink_lo     = self._thresholds["blink_low"]
+        blink_hi     = self._thresholds["blink_high"]
 
-        return max(0.0, min(100.0, score))
+        # ── Penalties (distraction signals) ──────────────────────────
+        if not face_detected:
+            delta -= 5.0
+
+        if yaw > yaw_thresh or pitch > pitch_thresh:
+            delta -= 3.0
+
+        if drowsy:
+            delta -= 5.0
+
+        # Only check blink rate after 60s warmup (deque needs time to fill)
+        if uptime > 60:
+            if blink_rpm < blink_lo or blink_rpm > blink_hi:
+                delta -= 2.0
+
+        if bad_posture:
+            delta -= 1.0
+
+        # ── Reward (focused) ─────────────────────────────────────
+        # Award positive points when no penalties were applied
+        if delta == 0.0 and face_detected and not drowsy:
+            if self._current_score >= 90:
+                delta += 0.5    # hard to reach 100
+            else:
+                delta += 2.0
+
+        return delta
 
     def run(self):
         """Main loop — call from a dedicated thread."""
         print("[FocusScore] Running.")
 
         while not self._stop_event.is_set():
-            raw = self._compute_raw_score()
-            self._window.append(raw)
+            delta = self._compute_delta()
 
-            # 5-second rolling average
-            smooth = sum(self._window) / len(self._window)
+            # Apply delta to get raw target score
+            raw_target = self._current_score + delta
+            raw_target = max(0.0, min(100.0, raw_target))
+
+            # EMA smoothing
+            smoothed = self._alpha * raw_target + (1 - self._alpha) * self._current_score
+            smoothed = max(0.0, min(100.0, smoothed))
+            self._current_score = smoothed
 
             ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self._history.append((ts, smooth))
+            self._history.append((ts, smoothed))
 
             # Write to shared state
-            self.shared_state.update({
-                "focus_score"    : round(smooth, 1),
-                "focus_score_raw": round(raw, 1),
-                "score_history"  : list(self._history),
-            })
+            self.shared_state["focus_score"] = round(smoothed, 1)
+            self.shared_state["score_history"] = list(self._history)
 
             # Persist to SQLite
-            self._save_to_db(ts, raw, smooth)
+            self._save_to_db(ts, smoothed)
 
             time.sleep(1.0)
 
         print("[FocusScore] Stopped.")
 
-    def _save_to_db(self, ts: str, raw: float, avg: float):
+    def _save_to_db(self, ts: str, score: float):
         """Insert one row into the focus_log table."""
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -132,7 +204,7 @@ class FocusScoreCalculator:
                    (timestamp, raw_score, avg_score, ear, yaw, pitch, blink_rpm)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    ts, raw, avg,
+                    ts, score, score,
                     self.shared_state.get("ear",           0.0),
                     self.shared_state.get("yaw",           0.0),
                     self.shared_state.get("pitch",         0.0),
@@ -148,19 +220,28 @@ class FocusScoreCalculator:
 # ── Standalone test ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
     state = {
-        "is_drowsy"    : False,
-        "looked_away"  : False,
-        "blink_rate_pm": 18,
-        "ear"          : 0.32,
-        "yaw"          : 5.0,
-        "pitch"        : 3.0,
+        "face_detected" : True,
+        "yaw"           : 5.0,
+        "pitch"         : 3.0,
+        "drowsy"        : False,
+        "blink_rate_pm" : 15.0,
+        "bad_posture"   : False,
+        "ear"           : 0.30,
     }
     calc = FocusScoreCalculator(shared_state=state)
     t = threading.Thread(target=calc.run, daemon=True)
     t.start()
 
-    for _ in range(10):
+    for i in range(15):
         time.sleep(1)
-        print(f"Focus: {state.get('focus_score')}  Raw: {state.get('focus_score_raw')}")
+        if i == 5:
+            state["yaw"] = 25.0
+            state["drowsy"] = True
+            print("  → Simulating distraction (yaw=25, drowsy)")
+        if i == 10:
+            state["yaw"] = 2.0
+            state["drowsy"] = False
+            print("  → Back to focused")
+        print(f"  Score={state.get('focus_score')}")
 
     calc.stop()

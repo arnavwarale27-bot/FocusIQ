@@ -1,0 +1,55 @@
+{
+  "ear_focused_mean": 0.2068,
+  "ear_distracted_mean": 0.2711,
+  "yaw_threshold": 28.12,
+  "pitch_threshold": 15.68,
+  "blink_low": 6.4,
+  "blink_high": 35.2,
+  "posture_penalty": 0.63,
+  "raw_stats": {
+    "focused": {
+      "ear": {
+        "mean": 0.2068,
+        "std": 0.0404
+      },
+      "yaw": {
+        "mean": 2.148,
+        "std": 2.1449
+      },
+      "pitch": {
+        "mean": 6.5233,
+        "std": 5.8357
+      },
+      "blink_rate_pm": {
+        "mean": 20.8404,
+        "std": 7.1975
+      },
+      "bad_posture": {
+        "mean": 0.1383,
+        "std": 0.3452
+      }
+    },
+    "distracted": {
+      "ear": {
+        "mean": 0.2711,
+        "std": 0.1626
+      },
+      "yaw": {
+        "mean": 54.0883,
+        "std": 75.0245
+      },
+      "pitch": {
+        "mean": 24.8357,
+        "std": 25.1361
+      },
+      "blink_rate_pm": {
+        "mean": 11.1456,
+        "std": 6.6097
+      },
+      "bad_posture": {
+        "mean": 0.6262,
+        "std": 0.4838
+      }
+    }
+  }
+}
