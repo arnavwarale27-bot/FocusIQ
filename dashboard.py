@@ -136,7 +136,6 @@ class ScoreGraph(FigureCanvas):
     def _style_axes(self):
         self.ax.set_facecolor("#1a1a2e")
         self.ax.set_ylim(0, 100)
-        self.ax.set_xlabel("Time (s ago)", color="#888", fontsize=9)
         self.ax.set_ylabel("Focus Score",  color="#888", fontsize=9)
         self.ax.tick_params(colors="#888")
         for spine in self.ax.spines.values():
@@ -151,14 +150,41 @@ class ScoreGraph(FigureCanvas):
             self.ax.cla()
             self._style_axes()
 
+            # Colored zones behind the line
+            self.ax.axhspan(75, 100, color="#00ff88", alpha=0.05, lw=0)
+            self.ax.axhspan(50, 75, color="#ffd700", alpha=0.05, lw=0)
+            self.ax.axhspan(0, 50, color="#ff4444", alpha=0.05, lw=0)
+
+            # Focus threshold dashed line
+            self.ax.axhline(75, color="#ffffff", alpha=0.4, linestyle="--", linewidth=1.5)
+            self.ax.text(5, 77, "Focus threshold", color="#ffffff", alpha=0.6, fontsize=8)
+
+            # Enforce exactly 5 minute window (300 seconds)
+            max_points = 300
+            self.ax.set_xlim(0, max_points)
+            self.ax.set_xticks([0, 60, 120, 180, 240, 300])
+            self.ax.set_xticklabels(["5m ago", "4m ago", "3m ago", "2m ago", "1m ago", "Now"])
+
             if not history:
                 self.draw_idle()   # draw_idle is safer than draw() in Qt
                 return
 
             scores = [s for _, s in history]
-            xs     = list(range(len(scores)))
-            self.ax.plot(xs, scores, color="#00d4ff", linewidth=1.5)
+            # Map points so the newest is always directly at 'Now' (x=300)
+            xs = [max_points - len(scores) + i for i in range(len(scores))]
+
+            # Thicker line with glowing effect
+            self.ax.plot(xs, scores, color="#00d4ff", linewidth=6.0, alpha=0.2) # glow
+            self.ax.plot(xs, scores, color="#00d4ff", linewidth=2.5)            # main line
             self.ax.fill_between(xs, scores, alpha=0.15, color="#00d4ff")
+
+            # Current score dot and annotation
+            last_x = xs[-1]
+            last_y = scores[-1]
+            self.ax.plot([last_x], [last_y], marker="o", markersize=6, color="#00d4ff")
+            self.ax.text(last_x - 3, last_y + 4, f"{int(last_y)}", color="#00d4ff", 
+                         fontsize=10, fontweight="bold", ha="right", va="bottom")
+
             self.ax.set_title("Focus Score — Last 5 min", color="#ccc", fontsize=10)
             self.draw_idle()
         except Exception:
@@ -175,7 +201,7 @@ class StatsBar(QWidget):
         layout = QHBoxLayout(self)
 
         self._labels = {}
-        for key in ["EAR", "Blink/min", "Yaw", "Pitch", "Posture", "Session"]:
+        for key in ["EAR", "Blink/min", "Yaw", "Pitch", "Posture", "Frustration", "Session"]:
             lbl = QLabel(f"{key}: --")
             lbl.setStyleSheet("color: #aaa; font-size: 11px; padding: 0 12px;")
             layout.addWidget(lbl)
@@ -192,6 +218,20 @@ class StatsBar(QWidget):
         self._labels["Pitch"   ].setText(f"Pitch: {state.get('pitch', 0):.1f}°")
         posture = "⚠️ BAD" if state.get("bad_posture") else "✅ OK"
         self._labels["Posture" ].setText(f"Posture: {posture}")
+        
+        frust_score = state.get('frustration_score', 0.0)
+        if frust_score >= 60:
+            f_color = "#ff4444"
+            f_icon = "🔴"
+        elif frust_score >= 30:
+            f_color = "#ffd700"
+            f_icon = "🟡"
+        else:
+            f_color = "#00ff88"
+            f_icon = "🟢"
+        self._labels["Frustration"].setText(f"Frustration: {f_icon} {int(frust_score)}")
+        self._labels["Frustration"].setStyleSheet(f"color: {f_color}; font-size: 11px; padding: 0 12px; font-weight: bold;")
+        
         self._labels["Session" ].setText(f"Session: {mm:02d}:{ss:02d}")
 
 
