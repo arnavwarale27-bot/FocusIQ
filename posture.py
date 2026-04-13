@@ -21,8 +21,7 @@ NOSE_IDX           = 0
 LEFT_SHOULDER_IDX  = 11
 RIGHT_SHOULDER_IDX = 12
 
-# Thresholds
-FORWARD_LEAN_THRESHOLD = 15.0   # degrees
+# Threshold via shared_state
 ALERT_AFTER_SECONDS    = 180    # 3 minutes
 
 
@@ -113,7 +112,8 @@ class PostureDetector:
                 mid_shoulder = (l_shoulder + r_shoulder) / 2.0
                 ref_above    = mid_shoulder - np.array([0, 100])
                 neck_angle   = _angle_degrees(ref_above, mid_shoulder, nose)
-                bad_posture  = neck_angle > FORWARD_LEAN_THRESHOLD
+                posture_angle = self.shared_state.get("posture_angle", 20.0)
+                bad_posture  = neck_angle > posture_angle
 
                 if bad_posture:
                     print(f"[Posture] ⚠️  Bad posture: {neck_angle:.1f}°")

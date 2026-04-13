@@ -31,9 +31,7 @@ MODEL_POINTS_3D = np.array([
     ( 150.0, -150.0,   -125.0),   # Right mouth corner
 ], dtype=np.float64)
 
-# Thresholds (degrees)
-YAW_THRESHOLD   = 30.0
-PITCH_THRESHOLD = 20.0
+# Thresholds via shared_state
 
 
 def _build_camera_matrix(frame_width: int, frame_height: int) -> np.ndarray:
@@ -129,13 +127,17 @@ class HeadPoseEstimator:
                 continue
 
             yaw, pitch, roll = _rotation_vector_to_euler(rot_vec)
-            looked_away = abs(yaw) > YAW_THRESHOLD or abs(pitch) > PITCH_THRESHOLD
+            
+            yaw_thresh   = self.shared_state.get("yaw_threshold", 20.0)
+            pitch_thresh = self.shared_state.get("pitch_threshold", 20.0)
+
+            looked_away = abs(yaw) > yaw_thresh or abs(pitch) > pitch_thresh
 
             if looked_away:
                 direction = []
-                if abs(yaw) > YAW_THRESHOLD:
+                if abs(yaw) > yaw_thresh:
                     direction.append("left" if yaw < 0 else "right")
-                if abs(pitch) > PITCH_THRESHOLD:
+                if abs(pitch) > pitch_thresh:
                     direction.append("down" if pitch > 0 else "up")
                 print(f"[HeadPose] 👀 Looked away — "
                       f"Yaw={yaw:.1f}° Pitch={pitch:.1f}° ({', '.join(direction)})")

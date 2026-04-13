@@ -45,6 +45,10 @@ from enforcer           import TwentyTwentyTwentyEnforcer
 from frustration_mapper import FrustrationMapper
 from database           import init_db, export_session_csv
 from calibration        import Calibrator
+from settings           import Settings
+from phone_detector     import PhoneDetector
+from xp_system          import XPSystem
+from notifier           import Notifier
 from dashboard          import run_dashboard   # must run on main thread
 
 # ── Optional MQTT IoT module (paho-mqtt) ─────────────────────────────────────
@@ -124,6 +128,9 @@ def main():
     # Initialise the database
     init_db()
 
+    # Load centralized settings
+    app_settings = Settings()
+
     # ── Shared state dictionary ───────────────────────────────────────────
     # All threads read from and write to this single dict.
     # Python's GIL makes simple dict reads/writes effectively atomic for
@@ -153,6 +160,9 @@ def main():
         "enforcer_active"   : False,
         "enforcer_countdown": 0,
     }
+    
+    # Pre-populate shared_state with initial settings
+    shared_state.update(app_settings.get_all())
 
     # ── Instantiate modules ───────────────────────────────────────────────
     face_tracker   = FaceTracker(shared_state,        camera_index=0, headless=True)
@@ -163,6 +173,9 @@ def main():
     enforcer       = TwentyTwentyTwentyEnforcer(shared_state)
     posture_det    = PostureDetector(shared_state,    camera_index=0)
     calibrator     = Calibrator(shared_state)
+    phone_det      = PhoneDetector(shared_state)
+    xp_sys         = XPSystem(shared_state)
+    notifier       = Notifier(shared_state)
 
     stop_event = threading.Event()
 
@@ -173,6 +186,8 @@ def main():
         threading.Thread(target=focus_calc.run,      name="FocusScore",    daemon=True),
         threading.Thread(target=frustration.run,     name="Frustration",   daemon=True),
         threading.Thread(target=enforcer.run,        name="Enforcer",      daemon=True),
+        threading.Thread(target=xp_sys.run,          name="XPSystem",      daemon=True),
+        threading.Thread(target=notifier.run,        name="Notifier",      daemon=True),
         # Posture uses its own camera capture loop
         threading.Thread(target=posture_det.run,     name="Posture",       daemon=True),
         # MQTT publisher
@@ -182,6 +197,8 @@ def main():
             name="MQTT",
             daemon=True,
         ),
+        # Extractor running YOLO inference
+        threading.Thread(target=phone_det.run,       name="PhoneDetector", daemon=True),
         # FaceTracker — runs its own OpenCV window AND feeds frames to dashboard
         threading.Thread(target=face_tracker.run,    name="FaceTracker",   daemon=True),
     ]
@@ -196,7 +213,7 @@ def main():
 
     try:
         # PyQt5 MUST run on the main thread
-        run_dashboard(shared_state, calibrator=calibrator)
+        run_dashboard(shared_state, calibrator=calibrator, settings=app_settings)
     except KeyboardInterrupt:
         print("\n[Main] Interrupted by user.")
     finally:
@@ -210,6 +227,9 @@ def main():
         frustration.stop()
         enforcer.stop()
         posture_det.stop()
+        phone_det.stop()
+        xp_sys.stop()
+        notifier.stop()
 
         # Wait briefly for threads
         for t in background_threads:

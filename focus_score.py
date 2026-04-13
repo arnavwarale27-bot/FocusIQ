@@ -30,32 +30,7 @@ from datetime import datetime
 DB_PATH   = os.path.join(os.path.dirname(__file__), "focus_data.db")
 JSON_PATH = os.path.join(os.path.dirname(__file__), "calibration.json")
 
-# Default thresholds (overridden by calibration.json if it exists)
-DEFAULT_THRESHOLDS = {
-    "yaw_threshold"   : 20.0,
-    "pitch_threshold" : 20.0,
-    "blink_low"       : 5.0,
-    "blink_high"      : 40.0,
-}
-
-
-def _load_thresholds() -> dict:
-    """Load personalized thresholds from calibration.json, or use defaults."""
-    thresholds = DEFAULT_THRESHOLDS.copy()
-    if os.path.exists(JSON_PATH):
-        try:
-            with open(JSON_PATH, "r") as f:
-                personal = json.load(f)
-            for key in DEFAULT_THRESHOLDS:
-                if key in personal:
-                    thresholds[key] = personal[key]
-            print(f"[FocusScore] Loaded personalized thresholds from {JSON_PATH}")
-        except Exception as e:
-            print(f"[FocusScore] Error loading calibration.json: {e} — using defaults")
-    else:
-        print("[FocusScore] No calibration.json found — using default thresholds")
-    return thresholds
-
+# Dynamic thresholds loaded directly from shared_state at compute time
 
 def _init_db(db_path: str):
     """Create the SQLite table if it doesn't exist."""
@@ -106,9 +81,6 @@ class FocusScoreCalculator:
         self._current_score = 100.0
         self._start_time = time.time()
 
-        # Load personalized or default thresholds
-        self._thresholds = _load_thresholds()
-
         _init_db(DB_PATH)
 
     def stop(self):
@@ -132,10 +104,10 @@ class FocusScoreCalculator:
         bad_posture   = state.get("bad_posture", False)
         uptime        = time.time() - self._start_time
 
-        yaw_thresh   = self._thresholds["yaw_threshold"]
-        pitch_thresh = self._thresholds["pitch_threshold"]
-        blink_lo     = self._thresholds["blink_low"]
-        blink_hi     = self._thresholds["blink_high"]
+        yaw_thresh   = state.get("yaw_threshold", 20.0)
+        pitch_thresh = state.get("pitch_threshold", 20.0)
+        blink_lo     = state.get("blink_rate_min", 5.0)
+        blink_hi     = state.get("blink_rate_max", 40.0)
 
         # ── Penalties (distraction signals) ──────────────────────────
         if not face_detected:
@@ -154,6 +126,11 @@ class FocusScoreCalculator:
 
         if bad_posture:
             delta -= 1.0
+
+        phone_detected = state.get("phone_detected", False)
+        if phone_detected:
+            delta -= 30.0
+            print("[FocusScore] 📱 Phone usage detected — score penalty applied")
 
         # ── Reward (focused) ─────────────────────────────────────
         # Award positive points when no penalties were applied
@@ -190,6 +167,7 @@ class FocusScoreCalculator:
 
             # Persist to SQLite
             self._save_to_db(ts, smoothed)
+
 
             time.sleep(1.0)
 

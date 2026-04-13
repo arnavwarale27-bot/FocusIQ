@@ -30,9 +30,7 @@ RIGHT_EYE_IDX = [362, 385, 387, 263, 373, 380]
 MAX_IDX_NEEDED = max(max(LEFT_EYE_IDX), max(RIGHT_EYE_IDX))  # 387
 
 # ── Thresholds ───────────────────────────────────────────────────────────────
-EAR_THRESHOLD       = 0.25   # below this = eyes considered closed
 BLINK_MAX_DURATION  = 0.40   # 400ms — anything shorter is a normal blink
-DROWSY_SECONDS      = 2.0    # eyes closed this long = drowsy
 
 
 def _eye_aspect_ratio(landmarks: list, eye_indices: list) -> float:
@@ -98,7 +96,8 @@ class BlinkDetector:
             ear = (left_ear + right_ear) / 2.0
 
             # ── State machine: open ↔ closed transitions ────────────────
-            if ear < EAR_THRESHOLD:
+            ear_threshold = self.shared_state.get("ear_threshold", 0.20)
+            if ear < ear_threshold:
                 # Eyes are below threshold
                 if self._eye_open:
                     # Transition: open → closed
@@ -130,7 +129,8 @@ class BlinkDetector:
             drowsy = False
             if not self._eye_open and self._eye_closed_since is not None:
                 closed_for = now - self._eye_closed_since
-                if closed_for > DROWSY_SECONDS:
+                drowsy_seconds = self.shared_state.get("drowsy_seconds", 3.0)
+                if closed_for > drowsy_seconds:
                     drowsy = True
                     print(f"[BlinkDetector] DROWSY — eyes closed "
                           f"{closed_for:.1f}s  EAR={ear:.3f}")

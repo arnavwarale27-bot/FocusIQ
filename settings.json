@@ -1,0 +1,9 @@
+{
+    "ear_threshold": 0.2,
+    "yaw_threshold": 20.0,
+    "pitch_threshold": 20.0,
+    "posture_angle": 34.0,
+    "drowsy_seconds": 3.0,
+    "blink_rate_min": 5.0,
+    "blink_rate_max": 40.0
+}
