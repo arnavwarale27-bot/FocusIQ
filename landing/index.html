@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Focus Monitor — Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@400;500&family=Inter:wght@400;600&display=swap');
+
+    :root {
+      --bg: #050810;
+      --panel: rgba(255, 255, 255, 0.03);
+      --border: rgba(0, 240, 255, 0.1);
+      --accent: #00f0ff;
+      --purple: #7b5ea7;
+      --green: #00e676;
+      --red: #ff4444;
+      --yellow: #ffd700;
+      --font-main: 'Inter', sans-serif;
+      --font-display: 'Syne', sans-serif;
+      --font-mono: 'DM Mono', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      background-color: var(--bg);
+      color: #fff;
+      font-family: var(--font-main);
+      overflow-x: hidden;
+      /* CSS Grid Dots */
+      background-image: radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px);
+      background-size: 40px 40px;
+      position: relative;
+    }
+
+    /* Scanline Sweep Animation */
+    body::after {
+      content: "";
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: linear-gradient(to bottom, transparent, rgba(0,240,255,0.1) 50%, transparent);
+      background-size: 100% 10px;
+      animation: scanline 3s linear infinite;
+      pointer-events: none;
+      z-index: 9999;
+    }
+    @keyframes scanline {
+      0% { transform: translateY(-100vh); }
+      100% { transform: translateY(100vh); }
+    }
+
+    /* ── START MENU OVERLAY ── */
+    #start-overlay {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(5, 8, 16, 0.95);
+      z-index: 10000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      transition: opacity 0.5s ease;
+    }
+    #start-overlay.hidden {
+      opacity: 0; pointer-events: none;
+    }
+    
+    .btn-start {
+      background: linear-gradient(90deg, #00f0ff, #0066ff);
+      color: #fff; font-family: var(--font-display); font-weight: 800; font-size: 1.2rem;
+      border: none; border-radius: 40px;
+      padding: 18px 40px; cursor: pointer;
+      box-shadow: 0 0 30px rgba(0, 240, 255, 0.4);
+      animation: pulse-start 1.5s infinite;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .btn-start:hover { transform: scale(1.05); }
+    @keyframes pulse-start {
+      0% { box-shadow: 0 0 20px rgba(0, 240, 255, 0.4); transform: scale(1); }
+      50% { box-shadow: 0 0 40px rgba(0, 240, 255, 0.8); transform: scale(1.03); }
+      100% { box-shadow: 0 0 20px rgba(0, 240, 255, 0.4); transform: scale(1); }
+    }
+    .start-sub { color: #888; font-size: 0.9rem; margin-top: 16px; letter-spacing: 1px; }
+
+    /* Particles Container for Start Menu */
+    #particles {
+      position: absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; overflow: hidden;
+    }
+    .particle {
+      position: absolute; width: 4px; height: 4px; background: var(--accent); border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent);
+      animation: floatUp linear infinite;
+    }
+    @keyframes floatUp {
+      from { transform: translateY(100vh); opacity: 0.8; }
+      to { transform: translateY(-10vh); opacity: 0; }
+    }
+
+    /* ── MAIN DASHBOARD ── */
+    .dashboard-wrapper {
+      max-width: 1200px; margin: 0 auto; padding: 20px;
+    }
+
+    /* Header */
+    header {
+      display: flex; justify-content: space-between; align-items: center;
+      padding-bottom: 12px; margin-bottom: 20px;
+      border-bottom: 1px solid rgba(0,240,255,0.4);
+      box-shadow: 0 10px 20px -10px rgba(0,240,255,0.1);
+    }
+    .title {
+      font-family: var(--font-display); font-weight: 800; font-size: 1.8rem;
+      animation: color-cycle 4s infinite alternate;
+    }
+    @keyframes color-cycle {
+      0% { color: #00f0ff; text-shadow: 0 0 10px rgba(0,240,255,0.4); }
+      100% { color: #7b5ea7; text-shadow: 0 0 10px rgba(123,94,167,0.4); }
+    }
+    .thermal-status {
+      font-family: var(--font-mono); font-size: 0.8rem; color: #aaa;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .thermal-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+    /* XP System */
+    .xp-bar-container {
+      display: flex; align-items: center; gap: 16px;
+      background: var(--panel); padding: 12px 20px; border-radius: 12px; border: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .xp-level { font-family: var(--font-display); font-weight: 800; color: var(--accent); text-shadow: 0 0 5px var(--accent); }
+    .xp-progress {
+      flex: 1; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; position: relative; overflow: hidden;
+    }
+    .xp-fill {
+      height: 100%; background: var(--accent); width: 0%; transition: width 0.3s ease;
+      position: relative; overflow: hidden;
+    }
+    .xp-fill::after {
+      content: ""; position: absolute; top:0; left:0; height:100%; width: 50px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.8), transparent);
+      animation: shimmer 2s infinite;
+    }
+    @keyframes shimmer { 0% { transform: translateX(-50px); } 100% { transform: translateX(1000px); } }
+    .xp-numbers { font-family: var(--font-mono); font-size: 0.75rem; color: #888; }
+
+    /* 2 Columns: Webcam/Dial (Left) + Graph (Right) */
+    .grid-2col {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 24px;
+    }
+
+    /* Webcam */
+    .webcam-wrap {
+      position: relative; border-radius: 12px; overflow: hidden;
+      border: 2px solid var(--accent);
+      background: rgba(0,0,0,0.5);
+      transition: border-color 0.3s;
+    }
+    .webcam-wrap.pulsing { animation: pulse-border 0.8s infinite alternate; }
+    .webcam-wrap.lost { border-color: var(--red) !important; animation: error-flash 0.5s infinite alternate; }
+    
+    @keyframes pulse-border {
+      from { border-color: #004d55; box-shadow: 0 0 5px #004d55; }
+      to { border-color: #00f0ff; box-shadow: 0 0 20px #00f0ff; }
+    }
+    @keyframes error-flash {
+      from { border-color: #ff4444; box-shadow: 0 0 10px #ff4444; }
+      to { border-color: #8b0000; box-shadow: 0 0 30px #8b0000; }
+    }
+
+    #live-camera { width: 100%; display: block; object-fit: cover; }
+    .live-badge {
+      position: absolute; top: 12px; left: 12px;
+      background: rgba(0,0,0,0.6); padding: 4px 10px; border-radius: 20px;
+      font-size: 0.7rem; font-weight: bold; display: flex; align-items: center; gap: 6px;
+    }
+    .live-badge .dot { width: 8px; height: 8px; background: var(--red); border-radius: 50%; opacity: 1; animation: flash 1s infinite alternate; }
+    @keyframes flash { from { opacity: 0.3; } to { opacity: 1; } }
+
+    /* Focus Dial Container */
+    .dial-wrap {
+      display: flex; justify-content: center; align-items: center; padding: 20px;
+      position: relative;
+    }
+    canvas#focusDial {
+      width: 260px; height: 260px; filter: drop-shadow(0 0 15px rgba(0,240,255,0.1));
+    }
+
+    /* Focus Graph */
+    .graph-wrap {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 16px; display: flex; flex-direction: column;
+    }
+    .graph-header { display: flex; justify-content: space-between; font-size: 0.7rem; color: #888; text-transform: uppercase; margin-bottom: 10px;}
+
+    /* Stat Cards */
+    .card-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px;
+    }
+    .stat-card {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px; padding: 20px; text-align: center;
+      transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+    }
+    .stat-card:hover {
+      transform: translateY(-4px); box-shadow: 0 10px 20px rgba(0,0,0,0.3); border-color: rgba(255,255,255,0.3);
+    }
+    .stat-card.c-score { border-top: 3px solid var(--accent); }
+    .stat-card.c-frust { border-top: 3px solid var(--red); }
+    .stat-card.c-posture{ border-top: 3px solid var(--yellow); }
+    .stat-card.c-time  { border-top: 3px solid #fff; }
+
+    .stat-val { font-family: var(--font-display); font-size: 2rem; font-weight: 800; margin-bottom: 4px; transition: color 0.3s;}
+    .stat-lbl { font-size: 0.7rem; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+
+    /* Action Buttons */
+    .actions-row {
+      display: flex; gap: 16px; justify-content: center; padding-top: 20px; border-top: 1px solid rgba(255,255,255,0.1);
+    }
+    .btn-action {
+      padding: 12px 24px; border-radius: 8px; border: none; font-weight: 600; color: #fff; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .btn-action:hover { transform: translateY(-2px); }
+    .btn-analyse { background: linear-gradient(90deg, #00f0ff, #0066ff); }
+    .btn-analyse:hover { box-shadow: 0 0 15px rgba(0,240,255,0.5); }
+    .btn-settings { background: linear-gradient(90deg, #7b5ea7, #b48ef5); }
+    .btn-settings:hover { box-shadow: 0 0 15px rgba(123,94,167,0.5); }
+    .btn-end { background: linear-gradient(90deg, #ff4444, #8b0000); border: 1px solid #ff4444; }
+    .btn-end:hover { box-shadow: 0 0 15px rgba(255,68,68,0.5); }
+
+    /* Badge Popup */
+    #badge-popup {
+      position: fixed; top: -100px; right: 20px; background: #0f111a; border: 2px solid #ffd700; border-radius: 12px;
+      padding: 16px 24px; display: flex; align-items: center; gap: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      transition: top 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 9999;
+    }
+    #badge-popup.show { top: 20px; }
+    .badge-icon { font-size: 2rem; }
+    .badge-text { color: #ffd700; font-family: var(--font-display); font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <!-- Start Menu Overlay -->
+  <div id="start-overlay">
+    <div id="particles"></div>
+    <div style="z-index: 1; text-align: center;">
+      <h1 style="font-family: var(--font-display); font-size: 3.5rem; margin-bottom: 10px; text-shadow: 0 0 20px var(--accent);">AI FOCUS MONITOR</h1>
+      <p style="color: var(--accent); font-family: var(--font-mono); margin-bottom: 40px; letter-spacing: 2px;">NEURAL COGNITIVE OPTIMIZATION PROTOCOL</p>
+      <a href="https://github.com/arnavwarale27-bot/project-alpha-" class="btn-start" style="text-decoration: none; display: inline-block;">📦 VIEW ON GITHUB</a>
+      <p class="start-sub">Deploy your own neural workstation</p>
+    </div>
+  </div>
+
+  <!-- Badge Popup -->
+  <div id="badge-popup">
+    <div class="badge-icon" id="badge-icon">🏆</div>
+    <div class="badge-text" id="badge-text">New Badge!</div>
+  </div>
+
+  <div class="dashboard-wrapper">
+    <header>
+      <div class="title">🧠 AI Focus Monitor</div>
+      <div class="thermal-status">
+        <span class="thermal-dot" id="thermal-dot" style="background:#888;"></span>
+        <span id="thermal-text">Thermal: Standby</span>
+      </div>
+    </header>
+
+    <!-- XP Bar -->
+    <div class="xp-bar-container">
+      <span class="xp-level" id="xp-level">Level 1</span>
+      <div class="xp-progress">
+        <div class="xp-fill" id="xp-fill"></div>
+      </div>
+      <span class="xp-numbers" id="xp-text">0 / 100 XP</span>
+    </div>
+
+    <!-- Live Grid -->
+    <div class="grid-2col">
+      <!-- Left: Camera + Dial -->
+      <div style="display: flex; flex-direction: column; gap: 24px;">
+        <div class="webcam-wrap" id="webcam-wrap">
+          <div class="live-badge"><span class="dot"></span>LIVE</div>
+          <img id="live-camera" src="/video_feed" alt="Camera off." />
+        </div>
+        <div class="dial-wrap">
+          <canvas id="focusDial"></canvas>
+        </div>
+      </div>
+
+      <!-- Right: Graph -->
+      <div class="graph-wrap">
+        <div class="graph-header">
+          <span>// Focus Score — Last 5 Minutes</span>
+          <span id="graph-current" style="color:var(--accent); font-weight:bold;">--</span>
+        </div>
+        <div style="flex:1; position:relative; min-height: 250px;">
+          <canvas id="focusChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stat Cards -->
+    <div class="card-grid">
+      <div class="stat-card c-score">
+        <div class="stat-val" id="val-score" style="color:var(--accent);">--</div>
+        <div class="stat-lbl">Focus Score</div>
+      </div>
+      <div class="stat-card c-frust">
+        <div class="stat-val" id="val-frust" style="color:var(--green);">0</div>
+        <div class="stat-lbl">Frustration</div>
+      </div>
+      <div class="stat-card c-posture">
+        <div class="stat-val" id="val-posture" style="color:var(--green);">OK</div>
+        <div class="stat-lbl">Posture</div>
+      </div>
+      <div class="stat-card c-time">
+        <div class="stat-val" id="val-time" style="color:#fff;">00:00</div>
+        <div class="stat-lbl">Session Time</div>
+      </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions-row">
+      <button class="btn-action btn-analyse" onclick="alert('Analysis UI coming soon!')">📊 Analyse</button>
+      <button class="btn-action btn-settings" onclick="alert('Settings UI coming soon!')">⚙️ Advanced Settings</button>
+      <button class="btn-action btn-end" id="btn-end" onclick="endSession()">⏹ End Session</button>
+    </div>
+  </div>
+
+  <script>
+    // Particles config
+    const particlesContainer = document.getElementById('particles');
+    for(let i=0; i<15; i++) {
+      let p = document.createElement('div');
+      p.className = 'particle';
+      p.style.left = Math.random() * 100 + 'vw';
+      p.style.animationDuration = Math.random() * 3 + 2 + 's';
+      p.style.animationDelay = Math.random() * 2 + 's';
+      particlesContainer.appendChild(p);
+    }
+
+    // Dial Drawing Logic
+    const dialCanvas = document.getElementById('focusDial');
+    const dCtx = dialCanvas.getContext('2d');
+    
+    // Scale for HDPI displays
+    const dSize = 300;
+    dialCanvas.width = dSize * 2;
+    dialCanvas.height = dSize * 2;
+    dialCanvas.style.width = dSize + "px";
+    dialCanvas.style.height = dSize + "px";
+    dCtx.scale(2, 2);
+
+    let currentScore = 0;
+    let targetScore = 0;
+
+    function getColor(score) {
+      if(score >= 75) return '#00e676';
+      if(score >= 50) return '#ffd700';
+      return '#ff4444';
+    }
+
+    function drawDial() {
+      // Smooth interpolation
+      currentScore += (targetScore - currentScore) * 0.1;
+      
+      dCtx.clearRect(0, 0, dSize, dSize);
+      const cx = dSize/2;
+      const cy = dSize/2;
+      const radius = dSize/2 - 20;
+
+      const cColor = getColor(currentScore);
+
+      // Radial Glow
+      const grd = dCtx.createRadialGradient(cx, cy, radius - 20, cx, cy, radius + 20);
+      grd.addColorStop(0, 'rgba(0,0,0,0)');
+      
+      // We need rgba version of the color map. Quick hack:
+      let rgba = 'rgba(255,68,68,0.2)';
+      if(currentScore>=75) rgba = 'rgba(0,230,118,0.2)';
+      else if(currentScore>=50) rgba = 'rgba(255,215,0,0.2)';
+      
+      grd.addColorStop(0.5, rgba);
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      dCtx.fillStyle = grd;
+      dCtx.fillRect(0,0,dSize,dSize);
+
+      // Background Track
+      dCtx.beginPath();
+      dCtx.arc(cx, cy, radius, Math.PI*0.75, Math.PI*2.25);
+      dCtx.strokeStyle = 'rgba(255,255,255,0.05)';
+      dCtx.lineWidth = 14;
+      dCtx.lineCap = 'round';
+      dCtx.stroke();
+
+      // Foreground Arc
+      const endAngle = Math.PI*0.75 + (currentScore/100) * (Math.PI*1.5);
+      dCtx.beginPath();
+      dCtx.arc(cx, cy, radius, Math.PI*0.75, endAngle);
+      dCtx.strokeStyle = cColor;
+      dCtx.lineWidth = 14;
+      dCtx.lineCap = 'round';
+      dCtx.stroke();
+
+      // Ticks
+      for(let i=0; i<=10; i++) {
+        const ang = Math.PI*0.75 + (i/10)*(Math.PI*1.5);
+        dCtx.beginPath();
+        dCtx.moveTo(cx + Math.cos(ang)*(radius-18), cy + Math.sin(ang)*(radius-18));
+        dCtx.lineTo(cx + Math.cos(ang)*(radius-4), cy + Math.sin(ang)*(radius-4));
+        dCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+        dCtx.lineWidth = 2;
+        dCtx.stroke();
+      }
+
+      // Text
+      dCtx.fillStyle = cColor;
+      dCtx.font = "800 64px Syne";
+      dCtx.textAlign = "center";
+      dCtx.textBaseline = "middle";
+      dCtx.fillText(Math.round(currentScore), cx, cy + 5);
+
+      requestAnimationFrame(drawDial);
+    }
+    requestAnimationFrame(drawDial);
+
+
+    // Focus Graph Setup
+    const gCtx = document.getElementById('focusChart').getContext('2d');
+    
+    const chartPlugin = {
+      id: 'customZones',
+      beforeDraw(chart) {
+        const { ctx, chartArea: { left, right, top, bottom }, scales: { y } } = chart;
+        const y75 = y.getPixelForValue(75);
+        const y50 = y.getPixelForValue(50);
+        const y0  = y.getPixelForValue(0);
+        const y100 = y.getPixelForValue(100);
+        
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 230, 118, 0.05)'; ctx.fillRect(left, y100, right - left, y75 - y100);
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.05)'; ctx.fillRect(left, y75, right - left, y50 - y75);
+        ctx.fillStyle = 'rgba(255, 68, 68, 0.05)'; ctx.fillRect(left, y50, right - left, y0 - y50);
+
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath(); ctx.moveTo(left, y75); ctx.lineTo(right, y75); ctx.stroke();
+        ctx.restore();
+      }
+    };
+
+    const chart = new Chart(gCtx, {
+      type: 'line',
+      plugins: [chartPlugin],
+      data: { labels: [], datasets: [{ data: [], borderColor: '#00f0ff', borderWidth: 2, pointRadius: 0, tension: 0.3 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        animation: false,
+        scales: {
+          x: { display: false },
+          y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.05)'}, ticks: {color: '#888'} }
+        },
+        plugins: { legend: {display: false} }
+      }
+    });
+
+    // API Polling & Integration
+    let isSessionActive = false;
+    let pollTimer = null;
+    let lastBadges = '';
+
+    async function startSession() {
+      await fetch('/api/start_session', {method:'POST'});
+      document.getElementById('start-overlay').classList.add('hidden');
+      isSessionActive = true;
+      pollTimer = setInterval(pollState, 1000);
+    }
+
+    async function endSession() {
+      const btn = document.getElementById('btn-end');
+      btn.innerText = "⏳ Generating Report...";
+      await fetch('/api/end_session', {method:'POST'});
+      clearInterval(pollTimer);
+      isSessionActive = false;
+      document.getElementById('start-overlay').classList.remove('hidden');
+      btn.innerText = "⏹ End Session";
+      document.getElementById('webcam-wrap').className = 'webcam-wrap'; // reset
+    }
+
+    function formatTime(s) {
+      const m = Math.floor(s/60);
+      const sc = s%60;
+      return String(m).padStart(2,'0') + ":" + String(sc).padStart(2,'0');
+    }
+
+    async function pollState() {
+      try {
+        const res = await fetch('/api/state');
+        const state = await res.json();
+        
+        targetScore = Math.round(state.focus_score || 0);
+
+        // Cards
+        const cColor = getColor(targetScore);
+        const scoreEl = document.getElementById('val-score');
+        scoreEl.innerText = targetScore;
+        scoreEl.style.color = cColor;
+
+        const frust = Math.round(state.frustration_score || 0);
+        const fEl = document.getElementById('val-frust');
+        fEl.innerText = frust;
+        if(frust >= 60) fEl.style.color = 'var(--red)';
+        else if(frust >= 30) fEl.style.color = 'var(--yellow)';
+        else fEl.style.color = 'var(--green)';
+
+        const pEl = document.getElementById('val-posture');
+        if(state.bad_posture){ pEl.innerText = '⚠️ BAD'; pEl.style.color = 'var(--red)'; }
+        else { pEl.innerText = 'OK'; pEl.style.color = 'var(--green)'; }
+
+        document.getElementById('val-time').innerText = formatTime(state.session_elapsed || 0);
+        document.getElementById('graph-current').innerText = targetScore;
+
+        // Webcam Status
+        const wrap = document.getElementById('webcam-wrap');
+        if(state.face_detected) {
+           wrap.className = 'webcam-wrap pulsing';
+        } else {
+           wrap.className = 'webcam-wrap lost';
+        }
+
+        // Thermal Mode
+        const mode = state.thermal_mode || "normal";
+        const dot = document.getElementById('thermal-dot');
+        const tTxt = document.getElementById('thermal-text');
+        if(mode === "eco"){ dot.style.background = "var(--yellow)"; tTxt.innerText = "Thermal: Eco (15fps)"; }
+        else if(mode === "rest"){ dot.style.background = "var(--red)"; tTxt.innerText = "Thermal: Cooling down"; }
+        else { dot.style.background = "var(--green)"; tTxt.innerText = "Thermal: Normal"; }
+
+        // XP
+        const xp = state.xp || 0;
+        const nxt = state.xp_to_next_level || 100;
+        document.getElementById('xp-level').innerText = "Level " + (state.level || 1);
+        document.getElementById('xp-fill').style.width = Math.min(xp/nxt*100, 100) + "%";
+        document.getElementById('xp-text').innerText = `${xp} / ${nxt} XP`;
+
+        // Graph Update
+        if(state.score_history) {
+           const history = state.score_history.slice(-300);
+           chart.data.labels = history.map((_, i) => i);
+           chart.data.datasets[0].data = history;
+           const curScore = history.length ? history[history.length-1] : 0;
+           chart.data.datasets[0].borderColor = getColor(curScore);
+           chart.update();
+        }
+
+        // Badges
+        const bgStr = JSON.stringify(state.badges || []);
+        if(lastBadges !== '' && bgStr !== lastBadges) {
+           // Find new
+           const old = JSON.parse(lastBadges);
+           const cur = state.badges;
+           for(let b of cur) {
+               if(!old.includes(b)) {
+                  document.getElementById('badge-text').innerText = "Badge Unlocked: " + b;
+                  document.getElementById('badge-popup').classList.add('show');
+                  setTimeout(()=>document.getElementById('badge-popup').classList.remove('show'), 3000);
+                  break;
+               }
+           }
+        }
+        lastBadges = bgStr;
+
+      } catch(e) {
+        console.error("Poll error", e);
+      }
+    }
+  </script>
+</body>
+</html>

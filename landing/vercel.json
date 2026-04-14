@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "name": "ai-focus-monitor-landing",
+  "cleanUrls": true,
+  "framework": null,
+  "installCommand": "echo 'No install needed'",
+  "buildCommand": "echo 'No build needed'",
+  "outputDirectory": "."
+}
