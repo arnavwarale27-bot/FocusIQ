@@ -7,6 +7,7 @@ Shares detected landmarks into a shared_state dict for other modules.
 import cv2
 import mediapipe as mp
 import threading
+import time
 
 # ── MediaPipe setup ──────────────────────────────────────────────────────────
 mp_face_mesh = mp.solutions.face_mesh
@@ -48,14 +49,43 @@ class FaceTracker:
 
     def run(self):
         """Main loop — call this in a dedicated thread."""
-        cap = cv2.VideoCapture(self.camera_index)
-        if not cap.isOpened():
-            print("[FaceTracker] ERROR: Cannot open camera.")
-            return
+        cap = None
 
-        print(f"[FaceTracker] Camera opened. {'Headless mode.' if self.headless else 'Press Q in the window to quit.'}")
+        print(f"[FaceTracker] Ready. Camera config: {'Headless mode.' if self.headless else 'Press Q to quit.'}")
 
         while not self._stop_event.is_set():
+            if not self.shared_state.get("session_active", False):
+                # Paused between sessions
+                if cap is not None and cap.isOpened():
+                    cap.release()
+                    cap = None
+                    self.shared_state["face_detected"] = False
+                    self.shared_state["frame"] = None
+                    print("[FaceTracker] Camera released (session paused).")
+                time.sleep(0.5)
+                continue
+
+            # Session is active, camera should be open
+            if cap is None or not cap.isOpened():
+                cap = cv2.VideoCapture(self.camera_index)
+                if not cap.isOpened():
+                    print("[FaceTracker] ERROR: Cannot open camera.")
+                    time.sleep(1)
+                    continue
+                print("[FaceTracker] Camera opened (session started).")
+
+            # Thermal Mode Adjustment
+            mode = self.shared_state.get("thermal_mode", "normal")
+            if mode == "rest":
+                # Rest mode: pause camera capture fully
+                if cap.isOpened(): cap.release(); cap = None
+                time.sleep(1.0)
+                continue
+            elif mode == "eco":
+                time.sleep(1.0 / 15.0) # Limit to 15fps max
+            else:
+                pass # Uncapped / 30fps
+
             ret, frame = cap.read()
             if not ret:
                 print("[FaceTracker] Warning: dropped frame.")
@@ -114,7 +144,8 @@ class FaceTracker:
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
-        cap.release()
+        if cap is not None:
+            cap.release()
         if not self.headless:
             cv2.destroyAllWindows()
         self.face_mesh.close()

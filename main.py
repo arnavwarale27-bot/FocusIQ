@@ -30,6 +30,7 @@ import os
 import sys
 import threading
 import time
+import webbrowser
 
 # ── macOS camera fix — MUST be set before cv2 is imported anywhere ────────────
 # Without this, OpenCV cannot open the camera from a background thread on macOS.
@@ -49,7 +50,9 @@ from settings           import Settings
 from phone_detector     import PhoneDetector
 from xp_system          import XPSystem
 from notifier           import Notifier
-from dashboard          import run_dashboard   # must run on main thread
+from session_report     import SessionReport
+from web_server         import run_web_server
+from thermal_manager    import ThermalManager
 
 # ── Optional MQTT IoT module (paho-mqtt) ─────────────────────────────────────
 try:
@@ -120,51 +123,24 @@ def mqtt_publisher(shared_state: dict, stop_event: threading.Event):
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main():
-    print("=" * 60)
-    print("  🧠  AI Focus Monitor — Starting up")
-    print("=" * 60)
-
+def start_ai_components():
+    """Initializes all AI modules and shared state without launching the web server."""
     # Initialise the database
     init_db()
-
-    # Load centralized settings
     app_settings = Settings()
 
-    # ── Shared state dictionary ───────────────────────────────────────────
-    # All threads read from and write to this single dict.
-    # Python's GIL makes simple dict reads/writes effectively atomic for
-    # most cases; for production use threading.Lock() around updates.
-    shared_state: dict = {
-        "landmarks"         : [],
-        "frame"             : None,
-        "face_detected"     : False,
-        "ear"               : 0.0,
-        "blink_count"       : 0,
-        "blink_rate_pm"     : 0.0,
-        "blink_velocity"    : 0.0,
-        "drowsy"            : False,
-        "yaw"               : 0.0,
-        "pitch"             : 0.0,
-        "roll"              : 0.0,
-        "looked_away"       : False,
-        "focus_score"       : 100.0,
-        "focus_score_raw"   : 100.0,
-        "score_history"     : [],
-        "neck_angle"        : 0.0,
-        "bad_posture"       : False,
-        "posture_alert_sent": False,
-        "frustration_detected": False,
-        "frustration_count" : 0,
-        "brow_distance"     : 0.0,
-        "enforcer_active"   : False,
-        "enforcer_countdown": 0,
+    shared_state = {
+        "landmarks": [], "frame": None, "face_detected": False, "ear": 0.0,
+        "blink_count": 0, "blink_rate_pm": 0.0, "blink_velocity": 0.0, "drowsy": False,
+        "yaw": 0.0, "pitch": 0.0, "roll": 0.0, "looked_away": False, "focus_score": 100.0,
+        "focus_score_raw": 100.0, "score_history": [], "neck_angle": 0.0,
+        "bad_posture": False, "posture_alert_sent": False, "frustration_detected": False,
+        "frustration_count": 0, "brow_distance": 0.0, "enforcer_active": False,
+        "enforcer_countdown": 0, "session_active": False, "thermal_mode": "normal",
+        "xp": 0, "level": 1, "badges": [], "xp_to_next_level": 100
     }
-    
-    # Pre-populate shared_state with initial settings
     shared_state.update(app_settings.get_all())
 
-    # ── Instantiate modules ───────────────────────────────────────────────
     face_tracker   = FaceTracker(shared_state,        camera_index=0, headless=True)
     blink_detector = BlinkDetector(shared_state,      fps=30)
     head_pose      = HeadPoseEstimator(shared_state,  fps=30)
@@ -176,10 +152,9 @@ def main():
     phone_det      = PhoneDetector(shared_state)
     xp_sys         = XPSystem(shared_state)
     notifier       = Notifier(shared_state)
+    session_rep    = SessionReport(shared_state)
+    thermal_mgr    = ThermalManager(shared_state)
 
-    stop_event = threading.Event()
-
-    # ── Build thread list ─────────────────────────────────────────────────
     background_threads = [
         threading.Thread(target=blink_detector.run, name="BlinkDetector", daemon=True),
         threading.Thread(target=head_pose.run,       name="HeadPose",      daemon=True),
@@ -188,32 +163,35 @@ def main():
         threading.Thread(target=enforcer.run,        name="Enforcer",      daemon=True),
         threading.Thread(target=xp_sys.run,          name="XPSystem",      daemon=True),
         threading.Thread(target=notifier.run,        name="Notifier",      daemon=True),
-        # Posture uses its own camera capture loop
+        threading.Thread(target=session_rep.run,     name="SessionRep",    daemon=True),
         threading.Thread(target=posture_det.run,     name="Posture",       daemon=True),
-        # MQTT publisher
-        threading.Thread(
-            target=mqtt_publisher,
-            args=(shared_state, stop_event),
-            name="MQTT",
-            daemon=True,
-        ),
-        # Extractor running YOLO inference
         threading.Thread(target=phone_det.run,       name="PhoneDetector", daemon=True),
-        # FaceTracker — runs its own OpenCV window AND feeds frames to dashboard
         threading.Thread(target=face_tracker.run,    name="FaceTracker",   daemon=True),
+        threading.Thread(target=thermal_mgr.run,     name="ThermalManager",daemon=True),
     ]
 
-    print(f"\n[Main] Starting {len(background_threads)} background threads…")
-    for t in background_threads:
-        t.start()
-        print(f"  ✅ {t.name} started.")
+    for t in background_threads: t.start()
 
-    print("\n[Main] Launching dashboard (main thread)…")
-    print("      Close the dashboard window to exit.\n")
+    return shared_state, calibrator, app_settings, session_rep
+
+def main():
+    print("=" * 60)
+    print("  🧠  AI Focus Monitor — Starting up")
+    print("=" * 60)
+
+    shared_state, calibrator, app_settings, session_rep = start_ai_components()
+
+
+    print("\n[Main] Launching Web HUD (main thread)…")
+    url = "http://127.0.0.1:8080"
+    print(f"      Dashboard active at {url}\n")
+
+    # Auto-open browser
+    from threading import Timer
+    Timer(1.5, lambda: webbrowser.open(url)).start()
 
     try:
-        # PyQt5 MUST run on the main thread
-        run_dashboard(shared_state, calibrator=calibrator, settings=app_settings)
+        run_web_server(shared_state, calibrator=calibrator, settings=app_settings, session_reporter=session_rep)
     except KeyboardInterrupt:
         print("\n[Main] Interrupted by user.")
     finally:
@@ -230,6 +208,8 @@ def main():
         phone_det.stop()
         xp_sys.stop()
         notifier.stop()
+        session_rep.stop()
+        thermal_mgr.stop()
 
         # Wait briefly for threads
         for t in background_threads:

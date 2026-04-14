@@ -4,3 +4,11 @@ __pycache__/
 *.db
 *.csv
 .DS_Store
+yolov8n.pt
+reports/
+calibration_data.json
+xp_data.json
+settings.json
+*.log
+.vercel
+node_modules/

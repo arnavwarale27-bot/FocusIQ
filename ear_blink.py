@@ -20,6 +20,7 @@ import time
 import threading
 import collections
 import numpy as np
+import cv2
 from scipy.spatial import distance as dist
 
 
@@ -31,6 +32,11 @@ MAX_IDX_NEEDED = max(max(LEFT_EYE_IDX), max(RIGHT_EYE_IDX))  # 387
 
 # ── Thresholds ───────────────────────────────────────────────────────────────
 BLINK_MAX_DURATION  = 0.40   # 400ms — anything shorter is a normal blink
+LOW_LIGHT_BRIGHTNESS = 60    # average pixel brightness threshold
+NORMAL_EAR_DEFAULT = 0.20
+DIM_EAR_DEFAULT    = 0.23
+NORMAL_CONSEC_FRAMES = 2     # frames below threshold to count as closed
+DIM_CONSEC_FRAMES    = 3     # stricter in dim light
 
 
 def _eye_aspect_ratio(landmarks: list, eye_indices: list) -> float:
@@ -67,10 +73,15 @@ class BlinkDetector:
         # Eye state tracking
         self._eye_open = True
         self._eye_closed_since = None   # timestamp when eyes first closed
+        self._consecutive_closed = 0    # consecutive frames below threshold
 
         # Blink counting
         self._blink_count = 0
         self._blink_times: collections.deque = collections.deque()  # rolling 60s
+
+        # Lighting state
+        self._low_light = False
+        self._low_light_logged = False
 
     def stop(self):
         self._stop_event.set()
@@ -90,21 +101,49 @@ class BlinkDetector:
 
             now = time.time()
 
+            # ── Lighting check ───────────────────────────────────────────
+            frame = self.shared_state.get("frame")
+            if frame is not None:
+                brightness = cv2.mean(frame)[0]  # average of blue channel
+                new_low_light = brightness < LOW_LIGHT_BRIGHTNESS
+                if new_low_light != self._low_light:
+                    self._low_light = new_low_light
+                    if new_low_light and not self._low_light_logged:
+                        print("[BlinkDetector] Low light mode active")
+                        self._low_light_logged = True
+                    elif not new_low_light:
+                        self._low_light_logged = False
+                self.shared_state["low_light"] = self._low_light
+            else:
+                self._low_light = False
+                self.shared_state["low_light"] = False
+
             # ── Compute EAR ──────────────────────────────────────────────
             left_ear  = _eye_aspect_ratio(landmarks, LEFT_EYE_IDX)
             right_ear = _eye_aspect_ratio(landmarks, RIGHT_EYE_IDX)
             ear = (left_ear + right_ear) / 2.0
 
             # ── State machine: open ↔ closed transitions ────────────────
-            ear_threshold = self.shared_state.get("ear_threshold", 0.20)
+            # Adaptive thresholds based on lighting
+            if self._low_light:
+                ear_threshold = self.shared_state.get("ear_threshold", DIM_EAR_DEFAULT)
+                # In low light, use the higher of user setting and dim default
+                ear_threshold = max(ear_threshold, DIM_EAR_DEFAULT)
+                consec_needed = DIM_CONSEC_FRAMES
+            else:
+                ear_threshold = self.shared_state.get("ear_threshold", NORMAL_EAR_DEFAULT)
+                consec_needed = NORMAL_CONSEC_FRAMES
+
             if ear < ear_threshold:
-                # Eyes are below threshold
-                if self._eye_open:
-                    # Transition: open → closed
+                self._consecutive_closed += 1
+                # Only transition to closed after required consecutive frames
+                if self._consecutive_closed >= consec_needed and self._eye_open:
+                    # Transition: open → closed (confirmed)
                     self._eye_open = False
                     self._eye_closed_since = now
             else:
                 # Eyes are above threshold
+                self._consecutive_closed = 0
                 if not self._eye_open:
                     # Transition: closed → open
                     closed_duration = now - (self._eye_closed_since or now)

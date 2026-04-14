@@ -1,0 +1,8 @@
+{
+  "version": 2,
+  "name": "ai-focus-monitor-frontend",
+  "rewrites": [
+    { "source": "/", "destination": "/dashboard.html" },
+    { "source": "/reports", "destination": "/reports.html" }
+  ]
+}

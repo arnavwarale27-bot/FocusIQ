@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Focus Monitor — Session Reports</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    :root {
+      --bg: #050810;
+      --cyan: #00f0ff;
+      --purple: #7b5ea7;
+      --green: #00e676;
+      --red: #ff4444;
+      --yellow: #ffd700;
+      --glass: rgba(255, 255, 255, 0.03);
+      --border: rgba(0, 240, 255, 0.1);
+      --font-display: 'Orbitron', sans-serif;
+      --font-main: 'Inter', sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+      background-color: var(--bg);
+      color: #fff;
+      font-family: var(--font-main);
+      min-height: 100vh;
+      background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+      background-size: 40px 40px;
+      padding: 40px;
+    }
+
+    nav {
+      position: fixed; top: 0; left: 0; width: 100%; height: 70px;
+      padding: 0 40px; display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      background: rgba(5, 8, 16, 0.8);
+      backdrop-filter: blur(10px);
+      z-index: 100;
+    }
+    .brand {
+      font-family: var(--font-display); font-weight: 900; font-size: 1.5rem;
+      background: linear-gradient(90deg, var(--cyan), var(--purple));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .nav-btn {
+      background: none; border: 1px solid var(--border); color: #888;
+      padding: 8px 16px; border-radius: 4px; font-size: 0.8rem; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .nav-btn:hover { border-color: var(--cyan); color: #fff; }
+
+    .container { max-width: 1000px; margin: 100px auto 0; }
+    
+    .header-row {
+      display: flex; justify-content: space-between; align-items: flex-end;
+      margin-bottom: 40px; padding-bottom: 20px; border-bottom: 2px solid var(--border);
+    }
+    h1 { font-family: var(--font-display); color: var(--cyan); font-size: 2rem; }
+    .stats-summary { display: flex; gap: 30px; }
+    .sum-box { text-align: right; }
+    .sum-val { font-family: var(--font-display); font-size: 1.5rem; color: #fff; }
+    .sum-lbl { font-size: 0.7rem; color: #888; text-transform: uppercase; }
+
+    .sessions-grid { display: grid; gap: 20px; }
+    
+    .session-card {
+      background: var(--glass); border: 1px solid var(--border); border-radius: 12px;
+      padding: 25px; display: flex; align-items: center; gap: 30px;
+      transition: transform 0.2s;
+    }
+    .session-card:hover { transform: scale(1.02); border-color: rgba(0, 240, 255, 0.4); }
+    
+    .card-date { flex: 1; }
+    .card-date .d { font-family: 'JetBrains Mono'; font-size: 1.1rem; }
+    .card-date .t { font-size: 0.8rem; color: #888; margin-top: 5px; }
+
+    .card-stat { width: 120px; text-align: center; }
+    .card-stat .v { font-family: var(--font-display); font-size: 1.2rem; }
+    .card-stat .l { font-size: 0.6rem; color: #888; text-transform: uppercase; margin-top: 4px; }
+
+    .card-badges { flex: 1.5; display: flex; gap: 8px; flex-wrap: wrap; }
+    .badge-pill {
+      background: rgba(255, 215, 0, 0.1); border: 1px solid rgba(255, 215, 0, 0.2);
+      color: var(--yellow); padding: 4px 10px; border-radius: 20px; font-size: 0.7rem;
+    }
+
+    .card-actions { display: flex; gap: 10px; }
+    .btn-dl {
+      background: rgba(255,255,255,0.05); color: #fff; border: 1px solid var(--border);
+      padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+      text-decoration: none; display: flex; align-items: center; gap: 6px;
+    }
+    .btn-dl:hover { background: var(--cyan); border-color: var(--cyan); color: #050810; }
+
+    #no-sessions { text-align: center; padding: 100px 0; color: #555; font-size: 1.2rem; font-style: italic; }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="brand">AI FOCUS MONITOR</div>
+    <button class="nav-btn" onclick="window.location.href='/'">◀ DASHBOARD</button>
+  </nav>
+
+  <div class="container">
+    <div class="header-row">
+      <div>
+        <h1>COMMAND RECORDS</h1>
+        <p style="color: #666; margin-top: 5px;">Historical performance telemetry</p>
+      </div>
+      <div class="stats-summary" id="summary">
+        <div class="sum-box">
+          <div class="sum-val" id="total-count">0</div>
+          <div class="sum-lbl">Sessions</div>
+        </div>
+        <div class="sum-box">
+          <div class="sum-val" id="avg-global">0</div>
+          <div class="sum-lbl">Avg Global Focus</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="no-sessions" style="display: none;">No neural logs found in archives.</div>
+    <div class="sessions-grid" id="grid"></div>
+  </div>
+
+  <script>
+    async function loadSessions() {
+      const res = await fetch('/api/sessions');
+      const sessions = await res.json();
+      
+      const grid = document.getElementById('grid');
+      const noSess = document.getElementById('no-sessions');
+      
+      if(!sessions || sessions.length === 0) {
+        noSess.style.display = 'block';
+        return;
+      }
+      
+      grid.innerHTML = '';
+      let sumFocus = 0;
+      
+      sessions.forEach(s => {
+        sumFocus += s.avg_focus;
+        const card = document.createElement('div');
+        card.className = 'session-card';
+        
+        const badgesHtml = s.badges.map(b => `<div class="badge-pill">🏆 ${b}</div>`).join('');
+        
+        card.innerHTML = `
+          <div class="card-date">
+            <div class="d">${s.date}</div>
+            <div class="t">LOGGED COMMAND SESSION</div>
+          </div>
+          <div class="card-stat">
+            <div class="v" style="color: ${s.avg_focus >= 75 ? 'var(--green)' : s.avg_focus < 50 ? 'var(--red)' : 'var(--yellow)'}">${s.avg_focus}%</div>
+            <div class="l">AVG FOCUS</div>
+          </div>
+          <div class="card-stat">
+            <div class="v">${s.duration}</div>
+            <div class="l">DURATION</div>
+          </div>
+          <div class="card-badges">${badgesHtml}</div>
+          <div class="card-actions">
+            <a href="/reports/${s.pdf}" target="_blank" class="btn-dl">PDF Report</a>
+            <a href="/reports/${s.csv}" target="_blank" class="btn-dl">CSV Data</a>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+      
+      document.getElementById('total-count').innerText = sessions.length;
+      document.getElementById('avg-global').innerText = (sumFocus / sessions.length).toFixed(1) + '%';
+    }
+
+    loadSessions();
+    setInterval(loadSessions, 30000); // 30s auto refresh
+  </script>
+</body>
+</html>

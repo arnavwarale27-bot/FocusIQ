@@ -40,7 +40,7 @@ class PhoneDetector:
                         if conf > best_conf:
                             best_conf = conf
 
-            # ── Method 2 - Behavioral scoring ──────────────────────────────
+            # ── Method 2 - Behavioral scoring (more sensitive than YOLO) ──
             pitch = self.shared_state.get("pitch", 0.0)
             yaw = abs(self.shared_state.get("yaw", 0.0))
             blink_rate = self.shared_state.get("blink_rate_pm", 15.0)
@@ -48,12 +48,17 @@ class PhoneDetector:
             
             target_score = 0.0
             
-            # Head down continuously
-            if pitch > 25.0:
-                target_score += 40.0
+            # Head down continuously (lowered from 25° to 15°)
+            if pitch > 15.0:
+                target_score += 45.0
                 
+            # NEW: Looking straight ahead but head tilted down slightly
+            # This catches the common case of phone held below screen level
+            if yaw < 10.0 and 15.0 < pitch < 35.0:
+                target_score += 35.0
+
             # Looking away + head down
-            if yaw > 20.0 and pitch > 15.0:
+            if yaw > 20.0 and pitch > 10.0:
                 target_score += 30.0
                 
             # Face drifting toward bottom of frame -> assume reading a phone embedded in lap
@@ -64,8 +69,8 @@ class PhoneDetector:
                     target_score += 20.0
                     
             # Low blink + head down -> likely staring hard
-            if blink_rate < 3.0 and pitch > 20.0:
-                target_score += 10.0
+            if blink_rate < 3.0 and pitch > 15.0:
+                target_score += 15.0
                 
             # Cap the arithmetic target mapping
             target_score = min(100.0, target_score)
@@ -73,12 +78,12 @@ class PhoneDetector:
             # EMA Smoothing
             self._smoothed_score = (self._alpha * target_score) + ((1.0 - self._alpha) * self._smoothed_score)
             
-            # Check 3-second continuous trigger condition
+            # Check 2-second continuous trigger condition (lowered from 3s)
             behavioral_detected = False
-            if self._smoothed_score >= 50.0:
+            if self._smoothed_score >= 40.0:  # lowered from 50
                 if self._behavior_active_since is None:
                     self._behavior_active_since = now
-                elif now - self._behavior_active_since >= 3.0:
+                elif now - self._behavior_active_since >= 2.0:  # lowered from 3s
                     behavioral_detected = True
             else:
                 self._behavior_active_since = None

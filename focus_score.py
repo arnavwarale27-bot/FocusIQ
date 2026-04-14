@@ -3,15 +3,21 @@ focus_score.py — Time-based attention score with EMA smoothing
 
 Score starts at 100 and changes per second:
   INCREASE (focused):
-    +2/s when face detected, not drowsy, head stable
-    +0.5/s once score > 90 (hard to reach 100)
+    +3/s when score < 85
+    +1/s when score 85–90
+    +0.3/s when score > 90
 
-  DECREASE (distracted):
+  DECREASE (distracted) — base rates:
     -5/s  face not detected
     -3/s  yaw > 20° or pitch > 20°
-    -5/s  drowsy
+    -5/s  drowsy (stays aggressive)
     -2/s  blink_rate_pm < 5 or > 40
-    -1/s  bad posture
+    -0.5/s  bad posture (minor signal)
+    -3/s  phone detected
+
+  Deduction scaling:
+    When score >= 85: all deductions × 0.5
+    When score >= 90: all deductions × 0.25
 
   Normal blinks → NO score change
   EMA smoothing: alpha = 0.1
@@ -117,7 +123,7 @@ class FocusScoreCalculator:
             delta -= 3.0
 
         if drowsy:
-            delta -= 5.0
+            delta -= 5.0   # stays aggressive — serious signal
 
         # Only check blink rate after 60s warmup (deque needs time to fill)
         if uptime > 60:
@@ -125,20 +131,29 @@ class FocusScoreCalculator:
                 delta -= 2.0
 
         if bad_posture:
-            delta -= 1.0
+            delta -= 0.5   # minor signal
 
         phone_detected = state.get("phone_detected", False)
         if phone_detected:
-            delta -= 30.0
+            delta -= 3.0
             print("[FocusScore] 📱 Phone usage detected — score penalty applied")
+
+        # ── Deduction scaling based on current score tier ─────────
+        if delta < 0.0:
+            if self._current_score >= 90:
+                delta *= 0.25   # very hard to drop from 90+
+            elif self._current_score >= 85:
+                delta *= 0.5    # slower drops above 85
 
         # ── Reward (focused) ─────────────────────────────────────
         # Award positive points when no penalties were applied
         if delta == 0.0 and face_detected and not drowsy:
-            if self._current_score >= 90:
-                delta += 0.5    # hard to reach 100
+            if self._current_score > 90:
+                delta += 0.3    # very hard to reach 100
+            elif self._current_score >= 85:
+                delta += 1.0    # moderate climb 85–90
             else:
-                delta += 2.0
+                delta += 3.0    # fast recovery below 85
 
         return delta
 
